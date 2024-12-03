@@ -33,53 +33,53 @@ int main() {
         error_message("[client] Eroare la connect.\n");
     }
 
-    char msg[100];
-    char msgresp[100];
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        error_message("[client] Eroare la crearea pipe-ului.\n");
+        return errno;
+    }
 
     int fiu = fork();
 
     if (fiu == -1) {
         error_message("[client] Eroare la fork.\n");
     }
+
     if (fiu == 0) {
         char msg[100];
-
+        int bytes;
         while (1) {
-            bzero(msg, 100);
-            int bytes;
-            if ((bytes = read(socket_fd, msg, 100)) < 0) {
+            bzero(msg, sizeof(msg));
+            bytes = 0;
+            if ((bytes = read(socket_fd, msg, sizeof(msg))) < 0) {
                 error_message("[client] Eroare la read in fork.\n");
             }
             if (bytes > 0) {
-                printf("Mesaj de la alt client: %s\n", msg);
+                printf("%s\n", msg);
+            } else if (bytes == 0) {
+                printf("Serverul s-a inchis!\n");
+                close(socket_fd);
+                return 0;
             }
         }
+
     } else {
+        char send[100];
+        int bytes;
         while (1) {
-            bzero(msg, sizeof(msg));
-            bzero(msgresp, sizeof(msgresp));
-            int bytes;
-            bytes = read(0, msg, 100);
-            if (bytes < 0) {
-                error_message("[client] Eroare la read din stdin.\n");
+            bzero(send, 100);
+            bytes = 0;
+            if ((bytes = read(0, send, sizeof(send))) < 0) {
+                error_message("Eroare la read de la stdin.\n");
             }
-
-            if (write(socket_fd, msg, 100) < 0) {
-                error_message("[client] Eroare la write catre server.\n");
-            }
-
-            bytes = read(socket_fd, msgresp, sizeof(msgresp));
             if (bytes > 0) {
-                msgresp[bytes] = '\0';
-                // printf("[client] Răspuns primit de la server: %s\n",
-                // msgresp);
-            } else if (bytes == 0) {
-                printf("[client] Serverul a închis conexiunea.\n");
-            } else {
-                perror("[client] Eroare la read().\n");
+                if (write(socket_fd, send, sizeof(send)) < 0) {
+                    error_message("Eroare la write in socket_fd.\n");
+                }
             }
         }
     }
+
     return 0;
 }
 
