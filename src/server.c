@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,13 +10,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define PORT 2728
-#define MAX_CONNECTIONS 100
-extern int errno;
+#include "headers/Globals.h"
+#include "headers/UsersManager.h"
 
-void error_message(char* resp);
 char* conv_addr(struct sockaddr_in address);
 void initialize_server();
+void run_command(struct UsersManager* manager, int fd);
 
 fd_set read_fds;
 fd_set active_fds;
@@ -27,10 +27,18 @@ struct sockaddr_in server;
 struct sockaddr_in from;
 struct timeval tv;
 
+struct user {
+    int fd;
+    char name[100];
+};
+struct user users[100];
+int nr_users = 0;
 int main() {
     printf("Serverul a fost pornit.\n");
 
-    initialise_server();
+    initialize_server();
+
+    struct UsersManager manager = get_users_manager();
 
     while (1) {
         bcopy((char*)&active_fds, (char*)&read_fds, sizeof(read_fds));
@@ -43,7 +51,8 @@ int main() {
             int len = sizeof(from);
             bzero(&from, len);
 
-            int client = accept(socket_fd, (struct sockaddr*)&from, &len);
+            int client =
+                accept(socket_fd, (struct sockaddr*)&from, (socklen_t*)&len);
 
             if (client < 0) {
                 error_message("[server] Eroare la accept.\n");
@@ -61,44 +70,7 @@ int main() {
 
         for (int fd = 0; fd <= maxim_fd; fd++) {
             if (fd != socket_fd && FD_ISSET(fd, &read_fds)) {
-                char msg[100], msgresp[100];
-                bzero(msg, sizeof(msg));
-                bzero(msgresp, sizeof(msgresp));
-
-                int bytes = read(fd, msg, sizeof(msg));
-                if (bytes < 0) {
-                    error_message("[server] Eroare la read de la client.\n");
-                } else if (bytes == 0) {
-                    printf("[server] [Client %i] Clientul s-a terminat? \n",
-                           fd);
-                    close(fd);
-                    FD_CLR(fd, &active_fds);
-                    // return 0;
-                }
-
-                // strcpy(msgresp, "Hello ");
-                // strcat(msgresp, msg);
-                // printf("[Client %i] [server] Trimitem raspunsul inapoi
-                // ...%s\n",
-                //        fd, msgresp);
-
-                char temp[100];
-                bzero(temp, sizeof(temp));
-                strcpy(temp, msg);
-                char* p = strtok(temp, " ");
-                int c = atoi(p);
-
-                if (write(c, msg, 100) < 0) {
-                    error_message("[server] Eroare la write in alt client.");
-                } else {
-                    printf("[Client %i] -> [Client %i], mesaj: %s", fd, c, msg);
-                }
-                strcpy(msgresp, "Mesajul s-a trimis cu succes.\n");
-                if (write(fd, msgresp, 100) < 0) {
-                    error_message("[server] Eroare la write catre client.\n");
-                }
-                // close(fd);
-                // FD_CLR(fd, &active_fds);
+                run_command(&manager, fd);
             }
         }
     }
@@ -106,10 +78,6 @@ int main() {
     return 0;
 }
 
-void error_message(char* resp) {
-    perror(resp);
-    exit errno;
-}
 char* conv_addr(struct sockaddr_in address) {
     static char str[25];
     char port[7];
@@ -120,7 +88,7 @@ char* conv_addr(struct sockaddr_in address) {
     return (str);
 }
 
-void initialise_server() {
+void initialize_server() {
     if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         error_message("[server] Eroare la crearea socket-ului.\n");
     }
@@ -136,7 +104,7 @@ void initialise_server() {
         -1) {
         error_message("[server] eroare la bind.\n");
     }
-    if (listen(socket_fd, MAX_CONNECTIONS) == -1) {
+    if (listen(socket_fd, MAX_USERS) == -1) {
         error_message("[server] Eroare la listen.\n");
     }
 
@@ -148,4 +116,150 @@ void initialise_server() {
 
     printf("Asteptam la portul %i\n", PORT);
     fflush(stdout);
+}
+
+void run_command(struct UsersManager* manager, int fd) {
+    char recv[MAX_BUFFER_SIZE], send[MAX_BUFFER_SIZE], temp[MAX_BUFFER_SIZE];
+    bzero(recv, sizeof(recv));
+    bzero(send, sizeof(send));
+
+    int bytes = read(fd, recv, sizeof(recv));
+    recv[strlen(recv) - 1] = '\0';
+
+    if (bytes < 0) {
+        perror("Eroare la read din fd_client!\n");
+        return;
+    } else if (bytes == 0) {
+        printf("Clientul %i a inchis conexiunea.\n", fd);
+        close(fd);
+        int ok = logout_user(manager, fd, send);
+        FD_CLR(fd, &active_fds);
+        return;
+    }
+    printf("From client: %s\n", recv);
+    strcpy(temp, recv);
+    char* command = strtok(temp, " ");
+
+    if (strcmp(command, "login") == 0) {
+        char user[MAX_LENGTH_USER_NAME] = "";
+        command = strtok(NULL, " ");
+        if (command != NULL) {
+            strcpy(user, command);
+        }
+
+        char password[100] = "";
+        command = strtok(NULL, " ");
+        if (command != NULL) {
+            strcpy(password, command);
+        }
+        if (strcmp(user, "") == 0 || strcmp(password, "") == 0) {
+            sprintf(send, "Sintaxa: login <user> <password>");
+            if (write(fd, send, sizeof(send)) < 0) {
+                perror("Eroare la write!");
+                return;
+            }
+            return;
+        }
+        int ok = login(manager, user, password, fd, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "add-user") == 0) {
+        char user[MAX_LENGTH_USER_NAME] = "";
+        command = strtok(NULL, " ");
+        if (command != NULL) {
+            strcpy(user, command);
+        }
+
+        char password[100] = "";
+        command = strtok(NULL, " ");
+        if (command != NULL) {
+            strcpy(password, command);
+        }
+
+        if (strcmp(user, "") == 0 || strcmp(password, "") == 0) {
+            sprintf(send, "Sintaxa: add-user <user> <password>");
+            if (write(fd, send, sizeof(send)) < 0) {
+                perror("Eroare la write!");
+                return;
+            }
+            return;
+        }
+
+        int ok = add_user(manager, user, password, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "send") == 0) {
+        char receiver[MAX_LENGTH_USER_NAME] = "";
+        char* p = strtok(NULL, " ");
+        if (p != NULL) {
+            strcpy(receiver, p);
+        }
+
+        char message[MAX_BUFFER_SIZE] = "";
+        p = strtok(NULL, "");
+        if (p != NULL) {
+            strcpy(message, p);
+        }
+
+        if (strcmp(message, "") == 0 || strcmp(receiver, "") == 0) {
+            sprintf(send, "Sintaxa: send <user> <content>");
+            if (write(fd, send, sizeof(send)) < 0) {
+                perror("Eroare la write!");
+                return;
+            }
+            return;
+        }
+
+        int ok = send_to_user(manager, fd, receiver, message, send);
+
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "get-online-users") == 0) {
+        int ok = get_online_users(manager, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "logout") == 0) {
+        int ok = logout_user(manager, fd, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "get-messages") == 0) {
+        char* user = strtok(NULL, " ");
+
+        if (user == NULL) {
+            sprintf(send, "Sintaxa: get-messages <user>");
+            if (write(fd, send, sizeof(send)) < 0) {
+                perror("Eroare la write!");
+                return;
+            }
+            return;
+        }
+
+        int ok = get_messages(manager, fd, user, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "get-posts") == 0) {
+        int ok = get_posts(manager, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else {
+        strcpy(send, "Comanda nu a fost gasita!");
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    }
 }

@@ -4,15 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#define PORT 2728
-extern int errno;
-
-void error_message(char* resp);
+#include "headers/Globals.h"
 
 int main() {
     printf("Un client a fost pornit.\n");
@@ -25,18 +24,12 @@ int main() {
     }
 
     server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr("0");
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
     server.sin_port = htons(PORT);
 
     if (connect(socket_fd, (struct sockaddr*)&server,
                 sizeof(struct sockaddr)) == -1) {
         error_message("[client] Eroare la connect.\n");
-    }
-
-    int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) {
-        error_message("[client] Eroare la crearea pipe-ului.\n");
-        return errno;
     }
 
     int fiu = fork();
@@ -46,7 +39,8 @@ int main() {
     }
 
     if (fiu == 0) {
-        char msg[100];
+        // Procesul fiu
+        char msg[MAX_BUFFER_SIZE];
         int bytes;
         while (1) {
             bzero(msg, sizeof(msg));
@@ -55,19 +49,21 @@ int main() {
                 error_message("[client] Eroare la read in fork.\n");
             }
             if (bytes > 0) {
+                msg[strlen(msg)] = '\0';
                 printf("%s\n", msg);
+
             } else if (bytes == 0) {
                 printf("Serverul s-a inchis!\n");
                 close(socket_fd);
-                return 0;
+                exit(EXIT_SUCCESS);
             }
         }
-
     } else {
-        char send[100];
+        // Procesul tată
+        char send[MAX_BUFFER_SIZE];
         int bytes;
         while (1) {
-            bzero(send, 100);
+            bzero(send, MAX_BUFFER_SIZE);
             bytes = 0;
             if ((bytes = read(0, send, sizeof(send))) < 0) {
                 error_message("Eroare la read de la stdin.\n");
@@ -79,11 +75,5 @@ int main() {
             }
         }
     }
-
     return 0;
-}
-
-void error_message(char* resp) {
-    perror(resp);
-    exit errno;
 }
