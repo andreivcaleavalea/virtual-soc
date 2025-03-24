@@ -1,20 +1,18 @@
 #include <arpa/inet.h>
 #include <errno.h>
+#include <signal.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include "headers/Globals.h"
 
 int main() {
-    printf("Un client a fost pornit.\n");
+    printf("Clientul a pornit.\n");
 
     int socket_fd;
     struct sockaddr_in server;
@@ -39,7 +37,6 @@ int main() {
     }
 
     if (fiu == 0) {
-        // Procesul fiu
         char msg[MAX_BUFFER_SIZE];
         int bytes;
         while (1) {
@@ -59,7 +56,6 @@ int main() {
             }
         }
     } else {
-        // Procesul tată
         char send[MAX_BUFFER_SIZE];
         int bytes;
         while (1) {
@@ -69,6 +65,12 @@ int main() {
                 error_message("Eroare la read de la stdin.\n");
             }
             if (bytes > 0) {
+
+                if (strcmp(send, "quit\n") == 0) {
+                    kill(fiu, SIGKILL);
+                    close(socket_fd);
+                    return 0;
+                }
                 if (write(socket_fd, send, sizeof(send)) < 0) {
                     error_message("Eroare la write in socket_fd.\n");
                 }

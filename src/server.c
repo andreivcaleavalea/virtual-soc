@@ -139,7 +139,14 @@ void run_command(struct UsersManager* manager, int fd) {
     printf("From client: %s\n", recv);
     strcpy(temp, recv);
     char* command = strtok(temp, " ");
-
+    if (command == NULL) {
+        strcpy(send, "Comanda nu a fost gasita!");
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+        return;
+    }
     if (strcmp(command, "login") == 0) {
         char user[MAX_LENGTH_USER_NAME] = "";
         command = strtok(NULL, " ");
@@ -221,7 +228,7 @@ void run_command(struct UsersManager* manager, int fd) {
             return;
         }
     } else if (strcmp(command, "get-online-users") == 0) {
-        int ok = get_online_users(manager, send);
+        int ok = get_online_users(fd, manager, send);
         if (write(fd, send, sizeof(send)) < 0) {
             perror("Eroare la write!");
             return;
@@ -250,11 +257,282 @@ void run_command(struct UsersManager* manager, int fd) {
             return;
         }
     } else if (strcmp(command, "get-posts") == 0) {
-        int ok = get_posts(manager, send);
+        int ok = get_posts(manager, fd, send);
         if (write(fd, send, sizeof(send)) < 0) {
             perror("Eroare la write!");
             return;
         }
+    } else if (strcmp(command, "add-to-friends") == 0) {
+        char* user = strtok(NULL, " ");
+        if (user == NULL) {
+            sprintf(send, "Sintaxa: add-to-friends <user>");
+            if (write(fd, send, sizeof(send)) < 0) {
+                perror("Eroare la write!");
+                return;
+            }
+            return;
+        }
+        int ok = add_friend(manager, fd, user, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "get-friends") == 0) {
+        int ok = get_friends(manager, fd, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "add-to-close-friends") == 0) {
+        char* user = strtok(NULL, " ");
+        if (user == NULL) {
+            sprintf(send, "Sintaxa: add-to-close-friends <user>");
+            if (write(fd, send, sizeof(send)) < 0) {
+                perror("Eroare la write!");
+                return;
+            }
+            return;
+        }
+        int ok = add_close_friend(manager, fd, user, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "get-close-friends") == 0) {
+        int ok = get_close_friends(manager, fd, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "create-post") == 0) {
+        char type[MAX_LENGTH_USER_NAME] = "";
+        char content[MAX_BUFFER_SIZE] = "";
+
+        char* p = strtok(NULL, " ");
+        if (p != NULL) {
+            strcpy(type, p);
+        }
+        p = strtok(NULL, "");
+        if (p != NULL) {
+            strcpy(content, p);
+        }
+        if (strcmp(type, "") == 0 || strcmp(content, "") == 0) {
+            sprintf(send,
+                    "Sintaxa: create-post <public/friends/close_friends> "
+                    "<content>");
+            if (write(fd, send, sizeof(send)) < 0) {
+                perror("Eroare la write!");
+                return;
+            }
+            return;
+        }
+        int type_int = -1;
+        if (strcmp(type, "public") == 0) {
+            type_int = 0;
+        } else if (strcmp(type, "friends") == 0) {
+            type_int = 1;
+        } else if (strcmp(type, "close_friends") == 0) {
+            type_int = 2;
+        }
+        if (type_int == -1) {
+            sprintf(send,
+                    "temp: Sintaxa: create-post <public/friends/close_friends> "
+                    "<content>");
+            if (write(fd, send, sizeof(send)) < 0) {
+                perror("Eroare la write!");
+                return;
+            }
+            return;
+        }
+        int ok = create_post(manager, fd, type_int, content, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "change-to-private-profile") == 0) {
+        int ok = change_profile(manager, fd, 1, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "change-to-public-profile") == 0) {
+        int ok = change_profile(manager, fd, 0, send);
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "help") == 0) {
+        sprintf(send,
+                "Aveti la dispozitie urmatoarele comenzi:\n"
+                "login <user> <password>\n"
+                "logout\n"
+                "add-user <user> <password>\n"
+                "send <user> <message>\n"
+                "get-messages <user>\n"
+                "get-online-users\n"
+                "get-posts\n"
+                "change-to-private-profile\n"
+                "change-to-public-profile\n"
+                "create-post <public/friends/close_friends> <content>\n"
+                "add_to_friends\n"
+                "add_to_close_friends\n"
+                "create-group\n"
+                "add-to-group\n"
+                "send-group\n"
+                "get-group-messages\n"
+                "quit\n");
+        if (write(fd, send, sizeof(send)) < 0) {
+            perror("Eroare la write!");
+            return;
+        }
+    } else if (strcmp(command, "create-group") == 0) {
+        char group_name[100];
+        command = strtok(NULL, " ");
+        if (command) {
+            strcpy(group_name, command);
+        }
+
+        if (strcmp(group_name, "") == 0) {
+            sprintf(send, "Sintaxa: create-group <group_name>");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int ok = create_group(manager, group_name, send);
+        write(fd, send, sizeof(send));
+    } else if (strcmp(command, "add-to-group") == 0) {
+        char group_name[100], user_name[100];
+        command = strtok(NULL, " ");
+        if (command) {
+            strcpy(group_name, command);
+        }
+        command = strtok(NULL, " ");
+        if (command) {
+            strcpy(user_name, command);
+        }
+
+        if (strcmp(group_name, "") == 0 || strcmp(user_name, "") == 0) {
+            sprintf(send, "Sintaxa: add-to-group <group_name> <user_name>");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int ok = add_user_to_group(manager, group_name, user_name, send);
+        write(fd, send, sizeof(send));
+    } else if (strcmp(command, "send-group") == 0) {
+        char group_name[100], message[MAX_BUFFER_SIZE];
+        command = strtok(NULL, " ");
+        if (command) {
+            strcpy(group_name, command);
+        }
+        command = strtok(NULL, "");
+        if (command) {
+            strcpy(message, command);
+        }
+
+        if (strcmp(group_name, "") == 0 || strcmp(message, "") == 0) {
+            sprintf(send, "Sintaxa: send-group <group_name> <message>");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int ok = send_message_to_group(
+            manager, group_name, get_name_from_fd(manager, fd), message, send);
+        write(fd, send, sizeof(send));
+    } else if (strcmp(command, "get-group-messages") == 0) {
+        char group_name[100];
+        command = strtok(NULL, " ");
+        if (command) {
+            strcpy(group_name, command);
+        }
+
+        if (strcmp(group_name, "") == 0) {
+            sprintf(send, "Sintaxa: get-group-messages <group_name>");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int ok = get_group_messages(manager, group_name, send);
+        write(fd, send, sizeof(send));
+    } else if (strcmp(command, "delete-user") == 0) {
+        if (!is_admin(manager, fd)) {
+            sprintf(send, "Nu aveți privilegii pentru această comandă!");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        char username[100];
+        command = strtok(NULL, " ");
+        if (command) {
+            strcpy(username, command);
+        }
+
+        if (strcmp(username, "") == 0) {
+            sprintf(send, "Sintaxa: delete-user <username>");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int ok = admin_delete_user(manager, username, send);
+        write(fd, send, sizeof(send));
+    } else if (strcmp(command, "delete-post") == 0) {
+        if (!is_admin(manager, fd)) {
+            sprintf(send, "Nu aveți privilegii pentru această comandă!");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int post_id = atoi(strtok(NULL, " "));
+        if (post_id <= 0) {
+            sprintf(send, "Sintaxa: delete-post <post_id>");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int ok = admin_delete_post(manager, post_id, send);
+        write(fd, send, sizeof(send));
+    } else if (strcmp(command, "delete-messages-of-user") == 0) {
+        if (!is_admin(manager, fd)) {
+            sprintf(send, "Nu aveți privilegii pentru această comandă!");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        char username[100];
+        command = strtok(NULL, " ");
+        if (command) {
+            strcpy(username, command);
+        }
+
+        if (strcmp(username, "") == 0) {
+            sprintf(send, "Sintaxa: delete-messages-of-user <username>");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int ok = admin_delete_messages_of_user(manager, username, send);
+        write(fd, send, sizeof(send));
+    } else if (strcmp(command, "delete-posts-of-user") == 0) {
+        if (!is_admin(manager, fd)) {
+            sprintf(send, "Nu aveți privilegii pentru această comandă!");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        char username[100];
+        command = strtok(NULL, " ");
+        if (command) {
+            strcpy(username, command);
+        }
+
+        if (strcmp(username, "") == 0) {
+            sprintf(send, "Sintaxa: delete-posts-of-user <username>");
+            write(fd, send, sizeof(send));
+            return;
+        }
+
+        int ok = admin_delete_posts_of_user(manager, username, send);
+        write(fd, send, sizeof(send));
     } else {
         strcpy(send, "Comanda nu a fost gasita!");
         if (write(fd, send, sizeof(send)) < 0) {
